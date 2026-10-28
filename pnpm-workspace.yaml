@@ -1,0 +1,11 @@
+packages:
+  - .
+storeDir: .sites-runtime/pnpm-store
+nodeLinker: hoisted
+fetchRetries: 1
+fetchTimeout: 30000
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true
+  unrs-resolver: true
