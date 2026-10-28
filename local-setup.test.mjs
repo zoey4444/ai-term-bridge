@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {Readable} from 'node:stream';
+import {handleLocalSetup} from '../scripts/local-setup.mjs';
+async function call(method,body,headers,root){const req=Readable.from(body?[JSON.stringify(body)]:[]);req.method=method;req.headers=headers||{};const r={status:0,body:'',headers:{},writeHead(s,h){this.status=s;this.headers=h;},end(x){this.body+=x||'';}};await handleLocalSetup(req,r,root);return r;}
+function fixture(){fs.mkdirSync('.sites-runtime',{recursive:true});const root=fs.mkdtempSync(path.resolve('.sites-runtime/setup-test-'));return {root,clean(){const file=path.join(root,'.dev.vars');if(fs.existsSync(file))fs.unlinkSync(file);fs.rmdirSync(root);}};}
+test('设置页不返回已保存密钥，禁止缓存和嵌入',async()=>{const f=fixture();try{fs.writeFileSync(path.join(f.root,'.dev.vars'),'DEEPSEEK_API_KEY=not-a-real-secret');const r=await call('GET',null,{},f.root);assert.equal(r.status,200);assert.ok(!r.body.includes('not-a-real-secret'));assert.equal(r.headers['Cache-Control'],'no-store');assert.equal(r.headers['X-Frame-Options'],'DENY');}finally{f.clean();}});
+test('其他网站不能提交本机密钥设置',async()=>{const f=fixture();try{const r=await call('POST',{key:'fake-test-key-only'},{origin:'https://example.com'},f.root);assert.equal(r.status,403);assert.ok(!fs.existsSync(path.join(f.root,'.dev.vars')));}finally{f.clean();}});
+test('有效设置写入隔离测试目录，并保留其他配置',async()=>{const f=fixture();try{fs.writeFileSync(path.join(f.root,'.dev.vars'),'DEEPSEEK_API_KEY=old\nDEEPSEEK_MODEL=deepseek-flash\n');const page=await call('GET',null,{},f.root);const token=page.body.match(/'X-Setup-Token':'([a-f0-9]+)'/)[1];const r=await call('POST',{key:'fake-test-key-only'},{origin:'http://127.0.0.1:8768','x-setup-token':token},f.root);assert.equal(r.status,200);assert.ok(!r.body.includes('fake-test-key-only'));const saved=fs.readFileSync(path.join(f.root,'.dev.vars'),'utf8');assert.ok(saved.includes('DEEPSEEK_API_KEY=fake-test-key-only'));assert.ok(saved.includes('DEEPSEEK_MODEL=deepseek-flash'));}finally{f.clean();}});
+test('密钥中的换行不能注入额外配置',async()=>{const f=fixture();try{const page=await call('GET',null,{},f.root);const token=page.body.match(/'X-Setup-Token':'([a-f0-9]+)'/)[1];const r=await call('POST',{key:'fake-test-key\nOTHER=value'},{origin:'http://127.0.0.1:8768','x-setup-token':token},f.root);assert.equal(r.status,400);assert.ok(!fs.existsSync(path.join(f.root,'.dev.vars')));}finally{f.clean();}});

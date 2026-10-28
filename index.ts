@@ -1,13 +1,30 @@
-import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
-import * as schema from "./schema";
+import handler from "vinext/server/fetch-handler";
+import { runWithConnectorBinding } from "../lib/connector-context";
+import type { ConnectorBinding } from "../lib/connector-contract.mjs";
 
-export function getDb() {
-  if (!env.DB) {
-    throw new Error(
-      "Cloudflare D1 binding `DB` is unavailable. Set the `d1` field in .openai/hosting.json to `DB` or let your control plane inject the real binding values before using the database."
-    );
-  }
+const worker = {
+  fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
+    let binding = ctx.props?.CONNECTORS;
+    // Local preview emulates the same request-scoped capability. This branch and
+    // the auxiliary service binding are absent from production builds.
+    if (import.meta.env.DEV && !binding && env.CONNECTORS) {
+      const preview = env.CONNECTORS;
+      const expiresAt = Date.now() + 60_000;
+      binding = {
+        async getContext() {
+          if (Date.now() >= expiresAt) return { status: "request_context_expired" };
+          return preview.getContext?.() ?? { status: "binding_unavailable" };
+        },
+        async invoke(connectorId, actionName, args) {
+          if (Date.now() >= expiresAt) {
+            return { status: "request_context_expired", message: "This request has expired. Please try again." };
+          }
+          return preview.invoke(connectorId, actionName, args);
+        },
+      };
+    }
+    return runWithConnectorBinding(binding, () => handler.fetch(request, env, ctx));
+  },
+};
 
-  return drizzle(env.DB, { schema });
-}
+export default worker;
