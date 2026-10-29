@@ -1,7 +1,7 @@
 """AI 术语桥的 Streamlit 演示入口。
 
 本文件负责网页交互、DeepSeek API 调用、资料搜索和结果展示；教学流程从
-skill/ai-term-bridge/ 下读取，作为 system prompt 提供给模型执行。
+skill_context.md 读取，作为 system prompt 提供给模型执行。
 """
 
 import json
@@ -19,12 +19,7 @@ ALLOWED_HOSTS = {
     "learn.microsoft.com", "cloud.google.com", "pytorch.org",
     "scikit-learn.org", "ibm.com",
 }
-SKILL_FILES = [
-    Path("skill/ai-term-bridge/SKILL.md"),
-    Path("skill/ai-term-bridge/references/workflow-contract.md"),
-    Path("skill/ai-term-bridge/references/resource-guide.md"),
-    Path("skill/ai-term-bridge/references/review-checklist.md"),
-]
+SKILL_CONTEXT_FILE = Path("skill_context.md")
 
 st.set_page_config(page_title="AI 术语桥", page_icon="🌉", layout="centered")
 st.title("AI 术语桥")
@@ -41,13 +36,10 @@ def get_key() -> str:
 
 
 def load_skill_instructions() -> str:
-    """读取 Skill 入口及其必要参考文件，让演示真正执行 Skill 流程。"""
-    chunks = []
-    for path in SKILL_FILES:
-        if not path.is_file():
-            raise FileNotFoundError(f"Skill 文件缺失：{path}")
-        chunks.append(f"\n\n--- {path.as_posix()} ---\n" + path.read_text(encoding="utf-8"))
-    return "\n".join(chunks)
+    """读取合并后的 Skill 核心规则，让演示真正执行 Skill 流程。"""
+    if not SKILL_CONTEXT_FILE.is_file():
+        raise FileNotFoundError(f"找不到 {SKILL_CONTEXT_FILE}")
+    return SKILL_CONTEXT_FILE.read_text(encoding="utf-8")
 
 
 def search_sources(key: str, term: str, language: str) -> list[dict]:
@@ -137,10 +129,11 @@ if submitted:
     else:
         inputs = {"term": term.strip(), "background": background.strip(), "coding": coding, "goal": goal, "language": language, "mode": mode}
         try:
+            instructions = load_skill_instructions()
             with st.spinner("正在查找资料……"):
                 sources = search_sources(key, term.strip(), language)
             with st.spinner("Skill 正在组织学习卡……"):
-                card = generate_learning_card(key, inputs, sources, load_skill_instructions())
+                card = generate_learning_card(key, inputs, sources, instructions)
             st.session_state["learning_card"] = card
         except requests.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else "未知"
@@ -153,7 +146,7 @@ if submitted:
             else:
                 st.error(f"资料或生成服务暂时不可用（HTTP {status}）。请稍后再试。")
         except FileNotFoundError as exc:
-            st.error(f"Skill 文件没有找到：{exc.filename or '请确认 skill/ai-term-bridge 文件已在仓库根目录。'}")
+            st.error(f"Skill 规则文件没有找到：请确认 {SKILL_CONTEXT_FILE.name} 与 streamlit_app.py 一起放在仓库根目录。")
         except requests.Timeout:
             st.error("连接 DeepSeek 超时。请稍后重试；这次请求可能已产生部分搜索费用。")
         except requests.RequestException as exc:
