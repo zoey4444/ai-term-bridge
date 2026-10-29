@@ -152,8 +152,17 @@ if submitted:
                 st.error("DeepSeek 服务当前请求较多，请稍后再试。")
             else:
                 st.error(f"资料或生成服务暂时不可用（HTTP {status}）。请稍后再试。")
-        except (requests.RequestException, ValueError, KeyError, FileNotFoundError):
-            st.error("本次生成没有完成。请稍后重试；如果持续失败，请维护者查看 Streamlit 日志。")
+        except FileNotFoundError as exc:
+            st.error(f"Skill 文件没有找到：{exc.filename or '请确认 skill/ai-term-bridge 文件已在仓库根目录。'}")
+        except requests.Timeout:
+            st.error("连接 DeepSeek 超时。请稍后重试；这次请求可能已产生部分搜索费用。")
+        except requests.RequestException as exc:
+            status = exc.response.status_code if getattr(exc, "response", None) is not None else "无 HTTP 状态码"
+            st.error(f"连接 DeepSeek 时失败：{type(exc).__name__}（{status}）。请勿重复点击，先把这条错误发给我。")
+        except (ValueError, KeyError) as exc:
+            st.error(f"收到的结果格式不符合预期：{type(exc).__name__}。没有显示原始响应或密钥；请把这条错误发给我。")
+        except Exception as exc:
+            st.error(f"应用内部遇到未分类错误：{type(exc).__name__}。没有显示原始请求或密钥；请把这条错误发给我。")
 
 card = st.session_state.get("learning_card")
 if card and isinstance(card.get("lesson"), dict):
